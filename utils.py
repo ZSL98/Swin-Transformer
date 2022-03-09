@@ -8,6 +8,8 @@
 import os
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
+import torch.nn as nn
 
 try:
     # noinspection PyUnresolvedReferences
@@ -16,15 +18,41 @@ except ImportError:
     amp = None
 
 
+class MultiExitCrossEntropyLoss(nn.Module):
+    def __init__(self):
+        super(MultiExitCrossEntropyLoss, self).__init__()
+        self.CEloss = nn.CrossEntropyLoss()
+        
+    def forward(self, outputs, targets):
+        loss = 0
+        for output in outputs:
+            loss += self.CEloss(output, targets)
+        return loss / len(outputs)
+
+
 def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
     logger.info(f"==============> Resuming form {config.MODEL.RESUME}....................")
     if config.MODEL.RESUME.startswith('https'):
         checkpoint = torch.hub.load_state_dict_from_url(
             config.MODEL.RESUME, map_location='cpu', check_hash=True)
+        msg = model.load_state_dict(checkpoint['model'], strict=False)
+        logger.info(msg)
     else:
         checkpoint = torch.load(config.MODEL.RESUME, map_location='cpu')
-    msg = model.load_state_dict(checkpoint['model'], strict=False)
-    logger.info(msg)
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in checkpoint['model'].items() if k in model_dict}
+        for k, v in pretrained_dict.items():
+            # print(k)
+            if k[:15] == 'layers.2.blocks' and int(k.split('.')[3])%2 == 0 and 'position' not in k:
+                if int(k.split('.')[3]) >= 10:
+                    pretrained_dict[k] = checkpoint['model']['layers.2.blocks.0.' + '.'.join(k.split('.')[4:])]
+            elif k[:15] == 'layers.2.blocks' and int(k.split('.')[3])%2 == 1 and 'position' not in k:
+                if int(k.split('.')[3]) >= 10:
+                    pretrained_dict[k] = checkpoint['model']['layers.2.blocks.1.' + '.'.join(k.split('.')[4:])]
+        model_dict.update(pretrained_dict)
+        msg = model.load_state_dict(model_dict)
+        # msg = model.load_state_dict(checkpoint['model'], strict=False)
+        # logger.info(msg)
     max_accuracy = 0.0
     if not config.EVAL_MODE and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer'])

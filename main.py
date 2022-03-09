@@ -25,7 +25,7 @@ from data import build_loader
 from lr_scheduler import build_scheduler
 from optimizer import build_optimizer
 from logger import create_logger
-from utils import load_checkpoint, load_pretrained, save_checkpoint, get_grad_norm, auto_resume_helper, reduce_tensor
+from utils import load_checkpoint, load_pretrained, save_checkpoint, get_grad_norm, auto_resume_helper, reduce_tensor, MultiExitCrossEntropyLoss
 
 try:
     # noinspection PyUnresolvedReferences
@@ -82,7 +82,7 @@ def main(config):
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
     model = build_model(config)
     model.cuda()
-    logger.info(str(model))
+    # logger.info(str(model))
 
     optimizer = build_optimizer(config, model)
     if config.AMP_OPT_LEVEL != "O0":
@@ -103,6 +103,8 @@ def main(config):
         criterion = SoftTargetCrossEntropy()
     elif config.MODEL.LABEL_SMOOTHING > 0.:
         criterion = LabelSmoothingCrossEntropy(smoothing=config.MODEL.LABEL_SMOOTHING)
+    elif config.MODEL.LOSS_TYPE == 'multi_exit_loss':
+        criterion = MultiExitCrossEntropyLoss()
     else:
         criterion = torch.nn.CrossEntropyLoss()
 
@@ -352,6 +354,6 @@ if __name__ == '__main__':
         logger.info(f"Full config saved to {path}")
 
     # print config
-    logger.info(config.dump())
+    # logger.info(config.dump())
 
     main(config)
