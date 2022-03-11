@@ -1,4 +1,4 @@
-AMP_OPT_LEVEL: O1
+AMP_OPT_LEVEL: O0
 AUG:
   AUTO_AUGMENT: rand-m9-mstd0.5-inc1
   COLOR_JITTER: 0.4
@@ -23,16 +23,18 @@ DATA:
   NUM_WORKERS: 8
   PIN_MEMORY: true
   ZIP_MODE: false
-EVAL_MODE: false
+EVAL_MODE: true
 LOCAL_RANK: 0
 MODEL:
   DROP_PATH_RATE: 0.5
   DROP_RATE: 0.0
+  EXIT_CHECK: 7
   LABEL_SMOOTHING: 0.1
-  NAME: swin_base_patch4_window7_224
+  LOSS_TYPE: multi_exit_loss
+  NAME: swin_base_patch4_window7_224_multi_exit
   NUM_CLASSES: 1000
   PRETRAINED: ''
-  RESUME: ''
+  RESUME: multi_exit
   SWIN:
     APE: false
     DEPTHS:
@@ -80,8 +82,8 @@ MODEL:
     PATCH_NORM: true
     PATCH_SIZE: 4
     WINDOW_SIZE: 7
-  TYPE: swin
-OUTPUT: output/swin_base_patch4_window7_224/default
+  TYPE: swin_multi_exit
+OUTPUT: output/swin_base_patch4_window7_224_multi_exit/default
 PRINT_FREQ: 10
 SAVE_FREQ: 1
 SEED: 0

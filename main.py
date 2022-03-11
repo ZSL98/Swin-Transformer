@@ -58,7 +58,7 @@ def parse_option():
     parser.add_argument('--accumulation-steps', type=int, help="gradient accumulation steps")
     parser.add_argument('--use-checkpoint', action='store_true',
                         help="whether to use gradient checkpointing to save memory")
-    parser.add_argument('--amp-opt-level', type=str, default='O1', choices=['O0', 'O1', 'O2'],
+    parser.add_argument('--amp-opt-level', type=str, default='O0', choices=['O0', 'O1', 'O2'],
                         help='mixed precision opt level, if O0, no amp is used')
     parser.add_argument('--output', default='output', type=str, metavar='PATH',
                         help='root of output folder, the full path is <output>/<model_name>/<tag> (default: output)')
@@ -98,13 +98,14 @@ def main(config):
 
     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
 
-    if config.AUG.MIXUP > 0.:
+    if config.MODEL.LOSS_TYPE == 'multi_exit_loss':
+        print('---Using MultiExitCrossEntropyLoss---')
+        criterion = MultiExitCrossEntropyLoss()
+    elif config.AUG.MIXUP > 0.:
         # smoothing is handled with mixup label transform
         criterion = SoftTargetCrossEntropy()
     elif config.MODEL.LABEL_SMOOTHING > 0.:
         criterion = LabelSmoothingCrossEntropy(smoothing=config.MODEL.LABEL_SMOOTHING)
-    elif config.MODEL.LOSS_TYPE == 'multi_exit_loss':
-        criterion = MultiExitCrossEntropyLoss()
     else:
         criterion = torch.nn.CrossEntropyLoss()
 
@@ -123,7 +124,8 @@ def main(config):
             logger.info(f'no checkpoint found in {config.OUTPUT}, ignoring auto resume')
 
     if config.MODEL.RESUME:
-        max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, logger)
+        if 'multi_exit' not in config.MODEL.RESUME:
+            max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, logger)
         acc1, acc5, loss = validate(config, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
         if config.EVAL_MODE:
@@ -254,7 +256,10 @@ def validate(config, data_loader, model):
         target = target.cuda(non_blocking=True)
 
         # compute output
-        output = model(images)
+        if 'multi_exit' in config.MODEL.TYPE:
+            output = model(images)[config.MODEL.EXIT_CHECK]
+        else:
+            output = model(images)
 
         # measure accuracy and record loss
         loss = criterion(output, target)

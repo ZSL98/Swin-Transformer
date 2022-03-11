@@ -1,4 +1,4 @@
-AMP_OPT_LEVEL: O1
+AMP_OPT_LEVEL: O0
 AUG:
   AUTO_AUGMENT: rand-m9-mstd0.5-inc1
   COLOR_JITTER: 0.4
@@ -23,16 +23,18 @@ DATA:
   NUM_WORKERS: 8
   PIN_MEMORY: true
   ZIP_MODE: false
-EVAL_MODE: false
+EVAL_MODE: true
 LOCAL_RANK: 0
 MODEL:
   DROP_PATH_RATE: 0.5
   DROP_RATE: 0.0
+  EXIT_CHECK: 9
   LABEL_SMOOTHING: 0.1
-  NAME: swin_base_patch4_window7_224
+  LOSS_TYPE: multi_exit_loss
+  NAME: multi_exit
   NUM_CLASSES: 1000
   PRETRAINED: ''
-  RESUME: ''
+  RESUME: multi_exit
   SWIN:
     APE: false
     DEPTHS:
@@ -80,8 +82,8 @@ MODEL:
     PATCH_NORM: true
     PATCH_SIZE: 4
     WINDOW_SIZE: 7
-  TYPE: swin
-OUTPUT: output/swin_base_patch4_window7_224/default
+  TYPE: swin_multi_exit
+OUTPUT: output/multi_exit/default
 PRINT_FREQ: 10
 SAVE_FREQ: 1
 SEED: 0
@@ -93,14 +95,14 @@ THROUGHPUT_MODE: false
 TRAIN:
   ACCUMULATION_STEPS: 0
   AUTO_RESUME: true
-  BASE_LR: 1.5625e-05
+  BASE_LR: 6.25e-05
   CLIP_GRAD: 5.0
   EPOCHS: 300
   LR_SCHEDULER:
     DECAY_EPOCHS: 30
     DECAY_RATE: 0.1
     NAME: cosine
-  MIN_LR: 1.5625e-07
+  MIN_LR: 6.25e-07
   OPTIMIZER:
     BETAS:
     - 0.9
@@ -111,5 +113,5 @@ TRAIN:
   START_EPOCH: 0
   USE_CHECKPOINT: false
   WARMUP_EPOCHS: 20
-  WARMUP_LR: 1.5625e-08
+  WARMUP_LR: 6.25e-08
   WEIGHT_DECAY: 0.05

@@ -2,7 +2,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from models.swin_transformer import BasicLayer, PatchEmbed, PatchMerging, SwinTransformer
+from models.swin_transformer import BasicLayer, PatchEmbed, PatchMerging, SwinTransformer, SwinTransformerBlock
 
 
 class SwinTransformer_s1(nn.Module):
@@ -231,9 +231,20 @@ class SwinTransformer_multi_exits(nn.Module):
         # build layers
         ori_backbone = SwinTransformer(embed_dim=128, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32], drop_path_rate=0.5)
         self.backbone = nn.ModuleList()
+        self.bridge = nn.ModuleList()
+        self.head = nn.ModuleList()
 
-        for k, v in ori_backbone.named_modules():
-            print(k)
+        # for k, v in ori_backbone.named_parameters():
+        #     print(k)
+
+        # print('--------------------')
+
+        i_layer = 2
+        input_resolution = (patches_resolution[0] // (2 ** i_layer), patches_resolution[1] // (2 ** i_layer))
+        dim=int(embed_dim * 2 ** i_layer)
+        drop=drop_rate
+        attn_drop=attn_drop_rate
+        drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])]
 
         for i in range(len(exit_list)+1):
             backbone = nn.Sequential()
@@ -241,29 +252,44 @@ class SwinTransformer_multi_exits(nn.Module):
                 for layer in ori_backbone.layers.named_children():
                     if layer[0] == '0' or layer[0] == '1':
                         backbone.add_module(layer[0], layer[1])
-                for layer in ori_backbone.layers[2].blocks.named_children():
-                    if int(layer[0]) < 2:
-                        backbone.add_module('blocks-'+layer[0], layer[1])
-                self.backbone.append(backbone)
-            elif i == len(exit_list):
-                for layer in ori_backbone.layers[2].blocks.named_children():
-                    if int(layer[0]) < 2*(i+1) and int(layer[0]) >= 2*i:
-                        backbone.add_module('blocks-'+layer[0], layer[1])
-                for layer in ori_backbone.layers[2].downsample.named_children():
-                    backbone.add_module(layer[0], layer[1])
-                for layer in ori_backbone.layers.named_children():
-                    if layer[0] == '3':
-                        backbone.add_module(layer[0], layer[1])
-                self.backbone.append(backbone)
-            else:
-                for layer in ori_backbone.layers[2].blocks.named_children():
-                    if int(layer[0]) < 2*(i+1) and int(layer[0]) >= 2*i:
-                        backbone.add_module('blocks-'+layer[0], layer[1])
-                self.backbone.append(backbone)
+
+            for j in range(2):
+                backbone.add_module('blocks-'+str(j), SwinTransformerBlock(dim=dim, input_resolution=input_resolution,
+                                 num_heads=num_heads[i_layer], window_size=window_size,
+                                 shift_size=0 if (j % 2 == 0) else window_size // 2,
+                                 mlp_ratio=mlp_ratio,
+                                 qkv_bias=qkv_bias, qk_scale=qk_scale,
+                                 drop=drop, attn_drop=attn_drop,
+                                 drop_path=drop_path[j+2*i] if isinstance(drop_path, list) else drop_path,
+                                 norm_layer=norm_layer))
+            # for layer in ori_backbone.layers[2].blocks.named_children():
+            #     if int(layer[0]) < 2*(i+1) and int(layer[0]) >= 2*i:
+            #         backbone.add_module('blocks-'+layer[0], layer[1])
+            self.backbone.append(backbone)
+
+        for i in range(len(exit_list)+1):
+            bridge = nn.Sequential()
+            bridge.add_module('downsample', PatchMerging(input_resolution=(patches_resolution[0] // (2 ** i_layer),
+                                                                            patches_resolution[1] // (2 ** i_layer)),
+                                                        dim=int(embed_dim * 2 ** i_layer),
+                                                        norm_layer=norm_layer))
+            # for layer in ori_backbone.layers[2].downsample.named_children():
+            #     print(layer[0])
+            #     bridge.add_module(layer[0], layer[1])
+            for layer in ori_backbone.layers.named_children():
+                if layer[0] == '3':
+                    bridge.add_module(layer[0], layer[1])
+            self.bridge.append(bridge)
+
+        # for k, v in self.backbone[0].named_parameters():
+        #     print(k, v.size())
+
+        # print('--------------------')
+        # for k, v in ori_backbone.named_parameters():
+        #     print(k, v.size())
 
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
-        self.head = nn.ModuleList()
         for i in range(len(exit_list)+1):
             self.head.append(nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity())
 
@@ -276,6 +302,11 @@ class SwinTransformer_multi_exits(nn.Module):
         dict_old = pretrained_model['model']
         dict_new = OrderedDict()
 
+        # for k,v in self.state_dict().items():
+        #     print(k)
+
+        # print('--------------------')
+
         for k,v in self.state_dict().items():
             split_layer_name = k.split('.')
             if split_layer_name[0] == 'patch_embed' or split_layer_name[0] == 'norm':
@@ -284,10 +315,10 @@ class SwinTransformer_multi_exits(nn.Module):
                 dict_new[k] = dict_old[split_layer_name[0]+'.'+split_layer_name[2]]
             elif split_layer_name[2] == '0' or split_layer_name[2] == '1' or split_layer_name[2] == '3':
                 dict_new[k] = dict_old['layers.'+split_layer_name[2]+'.'+'.'.join(split_layer_name[3:])]
-            elif split_layer_name[2] == 'reduction' or split_layer_name[2] == 'norm':
-                dict_new[k] = dict_old['layers.2.downsample.'+'.'.join(split_layer_name[2:])]
+            elif split_layer_name[3] == 'reduction' or split_layer_name[3] == 'norm':
+                dict_new[k] = dict_old['layers.2.downsample.'+'.'.join(split_layer_name[3:])]
             else:
-                dict_new[k] = dict_old['layers.2.blocks.'+split_layer_name[2].split('-')[1]+'.'+'.'.join(split_layer_name[3:])]
+                dict_new[k] = dict_old['layers.2.blocks.'+ str(int(split_layer_name[2].split('-')[1])+2*int(split_layer_name[1])) +'.'+'.'.join(split_layer_name[3:])]
 
         self.load_state_dict(dict_new, strict=False)
             
@@ -308,8 +339,12 @@ class SwinTransformer_multi_exits(nn.Module):
         x = self.pos_drop(x)
 
         for i in range(len(self.exit_list)+1):
+            # print('1', x.size())
             x = self.backbone[i](x)
-            x_exit = self.norm(x)  # B L C
+            # print('2', x.size())
+            x_exit = self.bridge[i](x)
+            # print('3', x.size())
+            x_exit = self.norm(x_exit)  # B L C
             x_exit = self.avgpool(x_exit.transpose(1, 2))  # B C 1
             x_exit = torch.flatten(x_exit, 1)
             x_exit = self.head[i](x_exit)
